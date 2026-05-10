@@ -52,7 +52,6 @@ def update_status(state_file: Path, status: str):
 
 
 def poll_environment(state_file: Path):
-    """Polls one environment's health endpoint"""
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -60,8 +59,30 @@ def poll_environment(state_file: Path):
         return
 
     env_id = state.get("id", "")
-    if not env_id:
-        return
+    container_name = f"{env_id}-app"
+
+    # Hit the container directly via Docker exec
+    # This bypasses Nginx and tests the app itself
+    import subprocess
+    result = subprocess.run(
+        ["docker", "exec", container_name,
+         "python3", "-c",
+         "import urllib.request; r = urllib.request.urlopen('http://localhost:5000/health', timeout=5); print(r.status)"],
+        capture_output=True, text=True, timeout=10
+    )
+
+    start = time.time()
+    if result.returncode == 0 and "200" in result.stdout:
+        status_code = 200
+        latency_ms = (time.time() - start) * 1000
+        error = ""
+    else:
+        status_code = 0
+        latency_ms = (time.time() - start) * 1000
+        error = result.stderr.strip() or "container_unreachable"
+
+    log(env_id, status_code, latency_ms, error)
+
 
     # Build the health URL through Nginx
     url = f"http://localhost/env/{env_id}/health"

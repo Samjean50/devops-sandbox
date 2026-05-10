@@ -72,25 +72,39 @@ case "$MODE" in
         ;;
 
     recover)
-        # Restore whatever was broken
         echo "→ Attempting recovery..."
+        CONTAINER="${ENV_ID}-app"
 
-        # Try to unpause if paused
-        docker unpause "$CONTAINER" 2>/dev/null && \
-            echo "  ✓ Container unpaused" || true
-
-        # Try to reconnect to platform network if disconnected
-        docker network connect platform-network "$CONTAINER" 2>/dev/null && \
-            echo "  ✓ Reconnected to platform network" || true
-
-        # Restart if crashed (not running)
+        # Get current state
         STATUS=$(docker inspect --format='{{.State.Status}}' \
             "$CONTAINER" 2>/dev/null || echo "missing")
-        if [ "$STATUS" != "running" ]; then
-            docker start "$CONTAINER" 2>/dev/null && \
-                echo "  ✓ Container restarted" || \
-                echo "  ✗ Could not restart — may need manual intervention"
+        echo "  Current status: $STATUS"
+
+        if [ "$STATUS" = "missing" ]; then
+            # Container was killed — need to recreate it
+            STATE_FILE="$(dirname "$SCRIPT_DIR")/envs/${ENV_ID}.json"
+            ENV_NAME=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['name'])")
+            docker run -d \
+                --name "$CONTAINER" \
+                --network "$ENV_ID" \
+                --label "sandbox.env=$ENV_ID" \
+                --label "sandbox.name=$ENV_NAME" \
+                -e "ENV_ID=$ENV_ID" \
+                -e "ENV_NAME=$ENV_NAME" \
+                sandbox-app:latest
+            docker network connect platform-network "$CONTAINER"
+            echo "  ✓ Container recreated"
+        elif [ "$STATUS" = "paused" ]; then
+            docker unpause "$CONTAINER"
+            echo "  ✓ Container unpaused"
+        elif [ "$STATUS" = "exited" ]; then
+            docker start "$CONTAINER"
+            echo "  ✓ Container restarted"
         fi
+
+        # Reconnect to platform network if disconnected
+        docker network connect platform-network "$CONTAINER" 2>/dev/null && \
+            echo "  ✓ Network reconnected" || true
 
         echo "  ✓ Recovery complete"
         ;;
