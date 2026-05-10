@@ -1,0 +1,53 @@
+# Platform docker-compose.yml
+# Starts Nginx, API, and health monitor
+# Individual environments are created dynamically by create_env.sh
+
+networks:
+  platform-network:
+    name: platform-network
+    driver: bridge
+
+services:
+
+  nginx:
+    image: nginx:alpine
+    container_name: platform-nginx
+    networks:
+      - platform-network
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: platform/api.Dockerfile
+    container_name: platform-api
+    networks:
+      - platform-network
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./envs:/app/envs
+      - ./logs:/app/logs
+      - ./nginx/conf.d:/app/nginx/conf.d
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./platform:/app/platform
+    environment:
+      - PROJECT_ROOT=/app
+    restart: unless-stopped
+
+  monitor:
+    build:
+      context: .
+      dockerfile: monitor/Dockerfile
+    container_name: platform-monitor
+    networks:
+      - platform-network
+    volumes:
+      - ./envs:/app/envs
+      - ./logs:/app/logs
+    restart: unless-stopped
